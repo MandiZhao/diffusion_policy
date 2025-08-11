@@ -1,0 +1,34 @@
+name: dexmachina_grasp_lowdim
+
+obs_dim: 77 
+action_dim: 23 
+
+dataset_dir: &dataset_dir data
+env_runner:
+  _target_: diffusion_policy.env_runner.dexmachina_lowdim_runner.DexMachinaGraspLowdimRunner
+  dataset_dir: *dataset_dir
+  n_train: 6
+  n_train_vis: 2
+  train_start_seed: 0
+  n_test: 50
+  n_test_vis: 4
+  test_start_seed: 100000
+  max_steps: 400
+  n_obs_steps: ${n_obs_steps}
+  n_action_steps: ${n_action_steps}
+  # n_latency_steps: ${n_latency_steps}
+  render_hw: [512, 512]
+  fps: 10
+  past_action: ${past_action_visible}
+  abs_action: False
+  n_envs: null
+
+dataset:
+  _target_: diffusion_policy.dataset.dexmachina_datasets.DexmachinaLowDimDataset
+  zarr_path: /home/mandi/devmachina/dexmachina/dataset/murp/filtered/no-vel-bbox-wrist7_box_ctrljoint_B6072_ho16/replay_buffer.zarr
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  seed: 42
+  val_ratio: 0.02
+  max_train_episodes: 90
