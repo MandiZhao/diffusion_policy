@@ -108,7 +108,7 @@ class MultiImageObsEncoder(ModuleAttrMixin):
                         mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
                 
                 this_transform = nn.Sequential(this_resizer, this_randomizer, this_normalizer)
-                key_transform_map[key] = this_transform
+                key_transform_map[key] = this_transform 
             elif type == 'low_dim':
                 low_dim_keys.append(key)
             else:
@@ -137,7 +137,7 @@ class MultiImageObsEncoder(ModuleAttrMixin):
                     batch_size = img.shape[0]
                 else:
                     assert batch_size == img.shape[0]
-                assert img.shape[1:] == self.key_shape_map[key]
+                assert img.shape[1:] == self.key_shape_map[key], f"Expected shape {self.key_shape_map[key]} for key {key}, got {img.shape[1:]}"
                 img = self.key_transform_map[key](img)
                 imgs.append(img)
             # (N*B,C,H,W)
@@ -171,7 +171,7 @@ class MultiImageObsEncoder(ModuleAttrMixin):
                 batch_size = data.shape[0]
             else:
                 assert batch_size == data.shape[0]
-            assert data.shape[1:] == self.key_shape_map[key]
+            assert data.shape[1:] == self.key_shape_map[key], f"Expected shape {self.key_shape_map[key]} for key {key}, got {data.shape[1:]}"
             features.append(data)
         
         # concatenate all features

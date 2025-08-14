@@ -23,7 +23,8 @@ import shutil
 from diffusion_policy.common.pytorch_util import dict_apply, optimizer_to
 from diffusion_policy.workspace.base_workspace import BaseWorkspace
 from diffusion_policy.policy.diffusion_unet_lowdim_policy import DiffusionUnetLowdimPolicy
-from diffusion_policy.dataset.base_dataset import BaseLowdimDataset
+from diffusion_policy.policy.diffusion_unet_image_policy import DiffusionUnetImagePolicy
+from diffusion_policy.dataset.base_dataset import BaseLowdimDataset, BaseImageDataset
 from diffusion_policy.env_runner.base_lowdim_runner import BaseLowdimRunner
 from diffusion_policy.common.checkpoint_util import TopKCheckpointManager
 from diffusion_policy.common.json_logger import JsonLogger
@@ -35,7 +36,7 @@ OmegaConf.register_new_resolver("eval", eval, replace=True)
 """
 NOTE: built upon train_diffusion_unet_lowdim_workspace.TrainDiffusionUnetLowdimWorkspace 
 """
-class DexmachinaDiffusionUnetLowdimWorkspace(BaseWorkspace):
+class DexmachinaDiffusionUnetWorkspace(BaseWorkspace):
     include_keys = ['global_step', 'epoch']
 
     def __init__(self, cfg: OmegaConf, output_dir=None):
@@ -46,10 +47,10 @@ class DexmachinaDiffusionUnetLowdimWorkspace(BaseWorkspace):
         torch.manual_seed(seed)
         np.random.seed(seed)
         random.seed(seed)
-
+        
         # configure model
         self.model: DiffusionUnetLowdimPolicy
-        self.model = hydra.utils.instantiate(cfg.policy)
+        self.model = hydra.utils.instantiate(cfg.policy)  
 
         self.ema_model: DiffusionUnetLowdimPolicy = None
         if cfg.training.use_ema:
@@ -71,12 +72,31 @@ class DexmachinaDiffusionUnetLowdimWorkspace(BaseWorkspace):
             if lastest_ckpt_path.is_file():
                 print(f"Resuming from checkpoint {lastest_ckpt_path}")
                 self.load_checkpoint(path=lastest_ckpt_path)
-
+        # device transfer
+        device = torch.device(cfg.training.device)
         # configure dataset
         dataset: BaseLowdimDataset
+        # from diffusion_policy.common.replay_buffer import ReplayBuffer
+        # from diffusion_policy.dataset.dexmachina_datasets import DexmachinaImgDataset
+        # import zarr
+        # breakpoint()
+        # replay_buffer = ReplayBuffer.copy_from_path(cfg.task.dataset.zarr_path, keys=['robot/dof_pos', 'imgs/front_960/depth'])
+
         dataset = hydra.utils.instantiate(cfg.task.dataset)
-        assert isinstance(dataset, BaseLowdimDataset)
-        train_dataloader = DataLoader(dataset, **cfg.dataloader)
+        print(f"Dataset created with {len(dataset)} samples")   
+        assert isinstance(dataset, BaseLowdimDataset) or isinstance(dataset, BaseImageDataset)
+        if cfg.task.env_runner.skip_env:
+            train_dataloader = DataLoader(
+                dataset, 
+                # generator=torch.Generator(device=device), # NOTE for some reason this is needed when sim env is enabled
+                **cfg.dataloader
+                )
+        else:
+            train_dataloader = DataLoader(
+                dataset, 
+                generator=torch.Generator(device=device), 
+                **cfg.dataloader
+                )
         normalizer = dataset.get_normalizer()
 
         # configure validation dataset
@@ -131,9 +151,7 @@ class DexmachinaDiffusionUnetLowdimWorkspace(BaseWorkspace):
             save_dir=os.path.join(self.output_dir, 'checkpoints'),
             **cfg.checkpoint.topk
         )
-
-        # device transfer
-        device = torch.device(cfg.training.device)
+        
         self.model.to(device)
         if self.ema_model is not None:
             self.ema_model.to(device)
@@ -150,27 +168,33 @@ class DexmachinaDiffusionUnetLowdimWorkspace(BaseWorkspace):
             cfg.training.checkpoint_every = 1
             cfg.training.val_every = 1
             cfg.training.sample_every = 1
-
+        # debug
+        # runner_log = env_runner.run(self.model)
+        # breakpoint()
+        
         # training loop
         log_path = os.path.join(self.output_dir, 'logs.json.txt')
         with JsonLogger(log_path) as json_logger:
             for local_epoch_idx in range(cfg.training.num_epochs):
                 step_log = dict()
                 # ========= train for this epoch ==========
+                if hasattr(cfg.training, 'freeze_encoder') and cfg.training.freeze_encoder:
+                    self.model.obs_encoder.eval()
+                    self.model.obs_encoder.requires_grad_(False)
                 train_losses = list()
                 with tqdm.tqdm(train_dataloader, desc=f"Training epoch {self.epoch}", 
                         leave=False, mininterval=cfg.training.tqdm_interval_sec) as tepoch:
                     for batch_idx, batch in enumerate(tepoch):
+                        
                         # device transfer
                         batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True))
                         if train_sampling_batch is None:
-                            train_sampling_batch = batch
-
+                            train_sampling_batch = batch 
                         # compute loss
+                        
                         raw_loss = self.model.compute_loss(batch)
                         loss = raw_loss / cfg.training.gradient_accumulate_every
-                        loss.backward()
-
+                        loss.backward() 
                         # step optimizer
                         if self.global_step % cfg.training.gradient_accumulate_every == 0:
                             self.optimizer.step()
@@ -212,14 +236,15 @@ class DexmachinaDiffusionUnetLowdimWorkspace(BaseWorkspace):
                 policy = self.model
                 if cfg.training.use_ema:
                     policy = self.ema_model
-                policy.eval()
-
+                policy.eval() 
                 # run rollout
                 if (self.epoch % cfg.training.rollout_every) == 0:
-                    runner_log = env_runner.run(policy)
-                    # log all
+                    runner_log, video_path = env_runner.run(policy, self.epoch)
+                    # log all 
                     step_log.update(runner_log)
-
+                    if video_path is not None:
+                        sim_video = wandb.Video(video_path)
+                        step_log['rollout_video'] = sim_video
                 # run validation
                 if (self.epoch % cfg.training.val_every) == 0:
                     with torch.no_grad():
@@ -243,7 +268,10 @@ class DexmachinaDiffusionUnetLowdimWorkspace(BaseWorkspace):
                     with torch.no_grad():
                         # sample trajectory from training set, and evaluate difference
                         batch = train_sampling_batch
-                        obs_dict = {'obs': batch['obs']}
+                        if 'obs' in batch and isinstance(batch['obs'], torch.Tensor): # NOTE low-dim policy has just {obs: tensor}
+                            obs_dict = {'obs': batch['obs']}
+                        else:
+                            obs_dict = batch['obs']
                         gt_action = batch['action']
                         
                         result = policy.predict_action(obs_dict)

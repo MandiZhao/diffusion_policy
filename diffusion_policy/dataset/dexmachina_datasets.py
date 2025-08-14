@@ -26,7 +26,7 @@ class DexmachinaLowDimDataset(BaseLowdimDataset):
         
         # Load replay buffer with required keys
         required_keys = state_keys + [action_key] 
-            
+        
         self.replay_buffer = ReplayBuffer.copy_from_path(
             zarr_path, keys=required_keys)
 
@@ -117,33 +117,24 @@ class DexmachinaImgDataset(BaseImageDataset):
         horizon: int = 1,
         pad_before: int = 0,
         pad_after: int = 0,
-        camera_names: List[str] = ['front_960'],
+        camera_keys: List[str] = ['imgs/front_960/depth'],
         state_keys: List[str] = ['robot/dof_pos', 'robot/kpt_pos', 'object/part_pos', 'object/part_quat', 'task/kpt_dists'],
-        action_key: str = 'actions',
-        use_rgb: bool = True,
-        use_depth: bool = True,
+        action_key: str = 'actions', 
         seed: int = 42,
         val_ratio: float = 0.0,
-        max_train_episodes: Optional[int] = None
+        max_train_episodes: Optional[int] = None,
+        n_obs_steps: int = 1,
+        n_action_steps: int = 1,
         ):
         
         super().__init__()
         
-        img_keys = []
-        for cam_name in camera_names:
-            if use_rgb:
-                img_keys.append(f'imgs/{cam_name}/rgb')
-            if use_depth:
-                img_keys.append(f'imgs/{cam_name}/depth')
-        
-        self.camera_names = camera_names
-        self.use_rgb = use_rgb
-        self.use_depth = use_depth
+        self.camera_keys = camera_keys
         self.state_keys = state_keys
         self.action_key = action_key
         
         # Build required keys list
-        required_keys = state_keys + [action_key] + img_keys 
+        required_keys = state_keys + [action_key] + camera_keys 
         
         # Load replay buffer
         self.replay_buffer = ReplayBuffer.copy_from_path(
@@ -171,6 +162,8 @@ class DexmachinaImgDataset(BaseImageDataset):
         self.horizon = horizon
         self.pad_before = pad_before
         self.pad_after = pad_after
+        self.n_obs_steps = n_obs_steps
+        self.n_action_steps = n_action_steps
 
     def get_validation_dataset(self):
         val_set = copy.copy(self)
@@ -200,11 +193,8 @@ class DexmachinaImgDataset(BaseImageDataset):
         normalizer.fit(data=data, last_n_dims=1, mode=mode, **kwargs)
         
         # Add image normalizer for all cameras
-        for cam_name in self.camera_names:
-            if self.use_rgb:
-                normalizer[f'image_{cam_name}_rgb'] = get_image_range_normalizer()
-            if self.use_depth:
-                normalizer[f'image_{cam_name}_depth'] = get_image_range_normalizer()
+        for key in self.camera_keys:
+            normalizer[key] = get_image_range_normalizer()
                 
         return normalizer
 
@@ -212,35 +202,41 @@ class DexmachinaImgDataset(BaseImageDataset):
         return len(self.sampler)
 
     def _sample_to_data(self, sample):
+        """
+        obs contains both low-dim state and image observations.
+        """
         # Extract observations
         obs_dict = {}
-        
+        state_dict = {} 
         # Add low-dimensional observations
         for key in self.state_keys:
             obs_data = sample[key].astype(np.float32)
             if len(obs_data.shape) > 2:  # Flatten if needed
                 obs_data = obs_data.reshape(obs_data.shape[0], -1)
-            obs_dict[key] = obs_data
+            state_dict[key] = obs_data
+        # obs_dict['state'] = np.concatenate(
+        #     list(state_dict.values()), axis=-1) 
+        obs_dict.update(state_dict)  # Add all state keys to obs_dict
         
         # Add image observations for each camera
-        for cam_name in self.camera_names:
-            if self.use_rgb:
-                # Convert from (T, H, W, C) to (T, C, H, W) and normalize to [0, 1]
-                rgb_key = f'imgs/{cam_name}/rgb'
-                rgb_image = np.moveaxis(sample[rgb_key], -1, 1) / 255.0
-                obs_dict[rgb_key] = rgb_image.astype(np.float32)
-            
-            if self.use_depth:
-                # Handle depth images - assuming they come as (T, H, W, 1)
-                depth_key = f'imgs/{cam_name}/depth'
-                depth_image = np.moveaxis(sample[depth_key], -1, 1)
-                # Normalize depth if needed (this depends on your depth range)
-                obs_dict[depth_key] = depth_image.astype(np.float32)
+        for cam_key in self.camera_keys:
+            image = sample[cam_key]
+            image = np.moveaxis(image, -1, 1)
+            # Convert from (T, H, W, C) to (T, C, H, W)
+            if 'rgb' in cam_key:
+                # normalize to [0, 1] 
+                image /= 255.0 
+            if 'depth' in cam_key:
+                # repeat (T, 1, H, W) to (T, 3, H, W)
+                image = np.repeat(image, repeats=3, axis=1)  # (T, 3, H, W)
+            obs_dict[cam_key] = image.astype(np.float32)
+            del sample[cam_key]  # Remove from sample to avoid duplication
 
         data = {
             'obs': obs_dict,
             'action': sample[self.action_key].astype(np.float32)
         }
+        
         return data
     
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
