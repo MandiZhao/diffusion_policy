@@ -1,39 +1,39 @@
 name: grasp_lowdim
 
-obs_dim: 77 
-action_dim: 23 
+obs_dim: 77
+action_dim: 23
 
 dataset_dir: &dataset_dir data
 
 env_runner:
   _target_: diffusion_policy.env_runner.dexmachina_runner.DexMachinaEnvRunner
-  dataset_dir: *dataset_dir 
-  n_test: 4 
+  dataset_dir: *dataset_dir
+  n_test: 4
   test_start_seed: 100000
   max_steps: 100
   n_obs_steps: ${n_obs_steps}
-  n_action_steps: ${n_action_steps} 
+  n_action_steps: ${n_action_steps}
   n_latency_steps: ${n_latency_steps}
   fps: 10
   past_action: ${past_action_visible}
-  abs_action: False 
+  abs_action: False
   # new: from dexmachina envs
   skip_env: False
-  env_kwargs_path: /home/mandi/devmachina/dexmachina/dataset/murp/${data_name}/${rl_run}/data_env.yaml # need to load this
+  env_kwargs_path: ${home_dir}/devmachina/dexmachina/dataset/murp/${data_name}/${rl_run}/data_env.yaml # need to load this
   state_keys: ${state_keys}
   camera_keys: ${camera_keys}
   vis_camera: front_960
   vis_render_hw: [256, 256]
-  repeat_depth: False 
+  repeat_depth: True
   renderer: batched # rasterizer
 
 dataset:
   _target_: diffusion_policy.dataset.dexmachina_datasets.DexmachinaLowDimDataset
-  zarr_path: /home/mandi/devmachina/dexmachina/dataset/murp/${data_name}/${rl_run}/replay_buffer.zarr
+  zarr_path: ${home_dir}/devmachina/dexmachina/dataset/murp/${data_name}/${rl_run}/replay_buffer.zarr
   horizon: ${horizon}
   pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}
   pad_after: ${eval:'${n_action_steps}-1'}
   seed: 42
   val_ratio: 0.02
   max_train_episodes: 90
-  state_keys: ${state_keys} 
+  state_keys: ${state_keys}

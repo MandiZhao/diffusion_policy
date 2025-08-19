@@ -16,14 +16,14 @@ dependencies:
   - certifi=2025.8.3=pyhd8ed1ab_0
   - cffi=1.17.1=py310h1fdaa30_1
   - charset-normalizer=3.3.2=pyhd3eb1b0_0
-  - cuda-cudart=12.1.105=0
-  - cuda-cupti=12.1.105=0
-  - cuda-libraries=12.1.0=0
-  - cuda-nvrtc=12.1.105=0
-  - cuda-nvtx=12.1.105=0
-  - cuda-opencl=12.9.19=0
-  - cuda-runtime=12.1.0=0
-  - cuda-version=12.9=3
+  # - cuda-cudart=12.1.105=0
+  # - cuda-cupti=12.1.105=0
+  # - cuda-libraries=12.1.0=0
+  # - cuda-nvrtc=12.1.105=0
+  # - cuda-nvtx=12.1.105=0
+  # - cuda-opencl=12.9.19=0
+  # - cuda-runtime=12.1.0=0
+  # - cuda-version=12.9=3
   - dav1d=1.2.1=h5eee18b_0
   - expat=2.7.1=h6a678d5_0
   - ffmpeg=4.3=hf484d3e_0
@@ -100,8 +100,8 @@ dependencies:
   - pycparser=2.21=pyhd3eb1b0_0
   - pysocks=1.7.1=py310h06a4308_0
   - python=3.10.18=h1a3bd86_0
-  - pytorch-cuda=12.1=ha16c6d3_6
-  - pytorch-mutex=1.0=cuda
+  # - pytorch-cuda=12.1=ha16c6d3_6
+  # - pytorch-mutex=1.0=cuda
   - pyyaml=6.0.2=py310h5eee18b_0
   - readline=8.3=hc2a1206_0
   - requests=2.32.4=py310h06a4308_0
@@ -244,9 +244,9 @@ dependencies:
       - tenacity==9.1.2
       - tensorboardx==2.6.4
       - tetgen==0.6.7
-      - torch==2.8.0+cu128
-      - torchaudio==2.8.0+cu128
-      - torchvision==0.23.0+cu128
+      # - torch==2.8.0+cu128
+      # - torchaudio==2.8.0+cu128
+      # - torchvision==0.23.0+cu128
       - trimesh==4.7.3
       - triton==3.4.0
       - typing-inspect==0.9.0
@@ -260,4 +260,4 @@ dependencies:
       - z3-solver==4.15.1.0
       - zarr==2.18.3
       - zipp==3.23.0
-prefix: /home/mandi/miniconda3/envs/robodiff310
+  #prefix: /home/mandi/miniconda3/envs/robodiff310

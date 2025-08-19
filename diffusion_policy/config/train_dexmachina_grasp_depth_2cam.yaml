@@ -1,26 +1,28 @@
 defaults:
   - _self_
-  - task: dexmachina_grasp_lowdim
+  - task: dexmachina_grasp_depth_2cam
 
 name: 'dexmachina'
 _target_: diffusion_policy.workspace.dexmachina_grasp_workspace.DexmachinaDiffusionUnetWorkspace
-
-obs_dim: ${task.obs_dim}
-action_dim: ${task.action_dim}
+cam1_name: front_256
+cam2_name: torso_256
+shape_meta: ${task.shape_meta}
 task_name: ${task.name}
-exp_name: "default"
+exp_name: "depth"
 
-data_name: wrapper
+data_name: fairsc
 rl_run: no-vel-bbox-wrist7_box_ctrljoint_B6072_ho16
 home_dir: /checkpoint/siro/mandizhao/ # /home/mandi
-
 state_keys:
 - 'robot/dof_pos'
-- 'robot/kpt_pos'
-- 'object/part_pos'
-- 'object/part_quat'
-- 'task/kpt_dists'
-camera_keys: []
+# - 'robot/kpt_pos'
+# - 'object/part_pos'
+# - 'object/part_quat'
+# - 'task/kpt_dists'
+
+camera_keys:
+- imgs/${cam1_name}/depth
+- imgs/${cam2_name}/depth
 
 horizon: 16
 n_obs_steps: 2
@@ -33,39 +35,48 @@ obs_as_global_cond: True
 pred_action_steps_only: False
 
 policy:
-  _target_: diffusion_policy.policy.diffusion_unet_lowdim_policy.DiffusionUnetLowdimPolicy
+  _target_: diffusion_policy.policy.diffusion_unet_image_policy.DiffusionUnetImagePolicy
 
-  model:
-    _target_: diffusion_policy.model.diffusion.conditional_unet1d.ConditionalUnet1D
-    input_dim: "${eval: ${task.action_dim} if ${obs_as_local_cond} or ${obs_as_global_cond} else ${task.obs_dim} + ${task.action_dim}}"
-    local_cond_dim: "${eval: ${task.obs_dim} if ${obs_as_local_cond} else None}"
-    global_cond_dim: "${eval: ${task.obs_dim}*${n_obs_steps} if ${obs_as_global_cond} else None}"
-    diffusion_step_embed_dim: 512 # 256
-    down_dims: [256, 512, 1024]
-    kernel_size: 5
-    n_groups: 8
-    cond_predict_scale: True
+  shape_meta: ${shape_meta}
 
   noise_scheduler:
-    _target_: diffusers.schedulers.scheduling_ddpm.DDPMScheduler
+    _target_: diffusers.schedulers.scheduling_ddim.DDIMScheduler
     num_train_timesteps: 100
     beta_start: 0.0001
     beta_end: 0.02
+    # beta_schedule is important
+    # this is the best we found
     beta_schedule: squaredcos_cap_v2
-    variance_type: fixed_small # Yilun's paper uses fixed_small_log instead, but easy to cause Nan
-    clip_sample: True # required when predict_epsilon=False
+    clip_sample: True
+    set_alpha_to_one: True
+    steps_offset: 0
     prediction_type: epsilon # or sample
 
+  obs_encoder:
+    _target_: diffusion_policy.model.vision.multi_image_obs_encoder.MultiImageObsEncoder
+    shape_meta: ${shape_meta}
+    rgb_model:
+      _target_: diffusion_policy.model.vision.model_getter.get_resnet
+      name: resnet18
+      weights: null
+    resize_shape: null # [480, 200]
+    crop_shape: null # [100, 100] # ch, cw 240x320 90%
+    random_crop: False
+    use_group_norm: True
+    share_rgb_model: True
+    imagenet_norm: False
+
   horizon: ${horizon}
-  obs_dim: ${obs_dim}
-  action_dim: ${action_dim}
   n_action_steps: ${eval:'${n_action_steps}+${n_latency_steps}'}
   n_obs_steps: ${n_obs_steps}
   num_inference_steps: 100
-  obs_as_local_cond: ${obs_as_local_cond}
   obs_as_global_cond: ${obs_as_global_cond}
-  pred_action_steps_only: ${pred_action_steps_only}
-  oa_step_convention: True
+  # crop_shape: null
+  diffusion_step_embed_dim: 128
+  down_dims: [512, 1024, 2048]
+  kernel_size: 5
+  n_groups: 8
+  cond_predict_scale: True
 
   # scheduler.step params
   # predict_epsilon: True
@@ -79,15 +90,15 @@ ema:
   max_value: 0.9999
 
 dataloader:
-  batch_size: 256
-  num_workers: 1
+  batch_size: 128
+  num_workers: 8
   shuffle: True
   pin_memory: True
   persistent_workers: True
 
 val_dataloader:
-  batch_size: 256
-  num_workers: 1
+  batch_size: 128
+  num_workers: 8
   shuffle: False
   pin_memory: True
   persistent_workers: False
@@ -112,15 +123,16 @@ training:
   use_ema: True
   # training loop control
   # in epochs
-  rollout_every: 250 # this should be more frequen that checkpoint_every!
-  checkpoint_every: 500
-  val_every: 5
-  sample_every: 5
+  rollout_every: 200 # this should be more frequen that checkpoint_every!
+  checkpoint_every: 200
+  val_every: 100
+  sample_every: 100
   # steps per epoch
   max_train_steps: null
   max_val_steps: null
   # misc
   tqdm_interval_sec: 1.0
+  freeze_encoder: False
 
 logging:
   project: devmachina

@@ -34,7 +34,7 @@ from diffusers.training_utils import EMAModel
 OmegaConf.register_new_resolver("eval", eval, replace=True)
 
 """
-NOTE: built upon train_diffusion_unet_lowdim_workspace.TrainDiffusionUnetLowdimWorkspace 
+NOTE: built upon train_diffusion_unet_lowdim_workspace.TrainDiffusionUnetLowdimWorkspace
 """
 class DexmachinaDiffusionUnetWorkspace(BaseWorkspace):
     include_keys = ['global_step', 'epoch']
@@ -47,10 +47,10 @@ class DexmachinaDiffusionUnetWorkspace(BaseWorkspace):
         torch.manual_seed(seed)
         np.random.seed(seed)
         random.seed(seed)
-        
+
         # configure model
         self.model: DiffusionUnetLowdimPolicy
-        self.model = hydra.utils.instantiate(cfg.policy)  
+        self.model = hydra.utils.instantiate(cfg.policy)
 
         self.ema_model: DiffusionUnetLowdimPolicy = None
         if cfg.training.use_ema:
@@ -81,20 +81,25 @@ class DexmachinaDiffusionUnetWorkspace(BaseWorkspace):
         # import zarr
         # breakpoint()
         # replay_buffer = ReplayBuffer.copy_from_path(cfg.task.dataset.zarr_path, keys=['robot/dof_pos', 'imgs/front_960/depth'])
+        # configure env runner
+        env_runner: BaseLowdimRunner
+        env_runner = hydra.utils.instantiate(
+            cfg.task.env_runner,
+            output_dir=self.output_dir)
+        assert isinstance(env_runner, BaseLowdimRunner)
 
         dataset = hydra.utils.instantiate(cfg.task.dataset)
-        print(f"Dataset created with {len(dataset)} samples")   
+        print(f"Dataset created with {len(dataset)} samples")
         assert isinstance(dataset, BaseLowdimDataset) or isinstance(dataset, BaseImageDataset)
         if cfg.task.env_runner.skip_env:
             train_dataloader = DataLoader(
-                dataset, 
-                # generator=torch.Generator(device=device), # NOTE for some reason this is needed when sim env is enabled
-                **cfg.dataloader
+                dataset, #generator=torch.Generator(device=device),
+                **cfg.dataloader,
                 )
         else:
             train_dataloader = DataLoader(
-                dataset, 
-                generator=torch.Generator(device=device), 
+                dataset,
+                generator=torch.Generator(device='cpu'), # NOTE for some reason this is needed when sim env is enabled
                 **cfg.dataloader
                 )
         normalizer = dataset.get_normalizer()
@@ -127,39 +132,13 @@ class DexmachinaDiffusionUnetWorkspace(BaseWorkspace):
                 cfg.ema,
                 model=self.ema_model)
 
-        # configure env runner
-        env_runner: BaseLowdimRunner
-        env_runner = hydra.utils.instantiate(
-            cfg.task.env_runner,
-            output_dir=self.output_dir)
-        assert isinstance(env_runner, BaseLowdimRunner)
-
-        # configure logging
-        wandb_run = wandb.init(
-            dir=str(self.output_dir),
-            config=OmegaConf.to_container(cfg, resolve=True),
-            **cfg.logging
-        )
-        wandb.config.update(
-            {
-                "output_dir": self.output_dir,
-            }
-        )
-
-        # configure checkpoint
-        topk_manager = TopKCheckpointManager(
-            save_dir=os.path.join(self.output_dir, 'checkpoints'),
-            **cfg.checkpoint.topk
-        )
-        
-        self.model.to(device)
-        if self.ema_model is not None:
-            self.ema_model.to(device)
-        optimizer_to(self.optimizer, device)
-
-        # save batch for sampling
-        train_sampling_batch = None
-
+        # # configure env runner
+        # env_runner: BaseLowdimRunner
+        # env_runner = hydra.utils.instantiate(
+        #     cfg.task.env_runner,
+        #     output_dir=self.output_dir)
+        # assert isinstance(env_runner, BaseLowdimRunner)
+        log_wandb = True
         if cfg.training.debug:
             cfg.training.num_epochs = 2
             cfg.training.max_train_steps = 3
@@ -168,10 +147,39 @@ class DexmachinaDiffusionUnetWorkspace(BaseWorkspace):
             cfg.training.checkpoint_every = 1
             cfg.training.val_every = 1
             cfg.training.sample_every = 1
+            log_wandb = False
+
+        # configure logging
+        if log_wandb:
+            wandb_run = wandb.init(
+                dir=str(self.output_dir),
+                config=OmegaConf.to_container(cfg, resolve=True),
+                **cfg.logging
+            )
+            wandb.config.update(
+                {
+                    "output_dir": self.output_dir,
+                }
+            )
+
+        # configure checkpoint
+        topk_manager = TopKCheckpointManager(
+            save_dir=os.path.join(self.output_dir, 'checkpoints'),
+            **cfg.checkpoint.topk
+        )
+
+        self.model.to(device)
+        if self.ema_model is not None:
+            self.ema_model.to(device)
+        optimizer_to(self.optimizer, device)
+
+        # save batch for sampling
+        train_sampling_batch = None
+
         # debug
         # runner_log = env_runner.run(self.model)
         # breakpoint()
-        
+
         # training loop
         log_path = os.path.join(self.output_dir, 'logs.json.txt')
         with JsonLogger(log_path) as json_logger:
@@ -182,25 +190,25 @@ class DexmachinaDiffusionUnetWorkspace(BaseWorkspace):
                     self.model.obs_encoder.eval()
                     self.model.obs_encoder.requires_grad_(False)
                 train_losses = list()
-                with tqdm.tqdm(train_dataloader, desc=f"Training epoch {self.epoch}", 
+                with tqdm.tqdm(train_dataloader, desc=f"Training epoch {self.epoch}",
                         leave=False, mininterval=cfg.training.tqdm_interval_sec) as tepoch:
                     for batch_idx, batch in enumerate(tepoch):
-                        
+
                         # device transfer
                         batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True))
                         if train_sampling_batch is None:
-                            train_sampling_batch = batch 
+                            train_sampling_batch = batch
                         # compute loss
-                        
+
                         raw_loss = self.model.compute_loss(batch)
                         loss = raw_loss / cfg.training.gradient_accumulate_every
-                        loss.backward() 
+                        loss.backward()
                         # step optimizer
                         if self.global_step % cfg.training.gradient_accumulate_every == 0:
                             self.optimizer.step()
                             self.optimizer.zero_grad()
                             lr_scheduler.step()
-                        
+
                         # update ema
                         if cfg.training.use_ema:
                             ema.step(self.model)
@@ -219,14 +227,15 @@ class DexmachinaDiffusionUnetWorkspace(BaseWorkspace):
                         is_last_batch = (batch_idx == (len(train_dataloader)-1))
                         if not is_last_batch:
                             # log of last step is combined with validation and rollout
-                            wandb_run.log(step_log, step=self.global_step)
+                            if log_wandb:
+                                wandb_run.log(step_log, step=self.global_step)
                             json_logger.log(step_log)
                             self.global_step += 1
 
                         if (cfg.training.max_train_steps is not None) \
                             and batch_idx >= (cfg.training.max_train_steps-1):
                             break
-                
+
                 # at the end of each epoch
                 # replace train_loss with epoch average
                 train_loss = np.mean(train_losses)
@@ -236,20 +245,21 @@ class DexmachinaDiffusionUnetWorkspace(BaseWorkspace):
                 policy = self.model
                 if cfg.training.use_ema:
                     policy = self.ema_model
-                policy.eval() 
+                policy.eval()
                 # run rollout
                 if (self.epoch % cfg.training.rollout_every) == 0:
-                    runner_log, video_path = env_runner.run(policy, self.epoch)
-                    # log all 
+                    runner_log = env_runner.run(policy, self.epoch)
+                    # log all
                     step_log.update(runner_log)
-                    if video_path is not None:
+                    video_path = runner_log.pop('video_path', None)
+                    if video_path is not None and log_wandb:
                         sim_video = wandb.Video(video_path)
                         step_log['rollout_video'] = sim_video
                 # run validation
                 if (self.epoch % cfg.training.val_every) == 0:
                     with torch.no_grad():
                         val_losses = list()
-                        with tqdm.tqdm(val_dataloader, desc=f"Validation epoch {self.epoch}", 
+                        with tqdm.tqdm(val_dataloader, desc=f"Validation epoch {self.epoch}",
                                 leave=False, mininterval=cfg.training.tqdm_interval_sec) as tepoch:
                             for batch_idx, batch in enumerate(tepoch):
                                 batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True))
@@ -273,7 +283,7 @@ class DexmachinaDiffusionUnetWorkspace(BaseWorkspace):
                         else:
                             obs_dict = batch['obs']
                         gt_action = batch['action']
-                        
+
                         result = policy.predict_action(obs_dict)
                         if cfg.pred_action_steps_only:
                             pred_action = result['action']
@@ -292,8 +302,8 @@ class DexmachinaDiffusionUnetWorkspace(BaseWorkspace):
                         del result
                         del pred_action
                         del mse
-                
-                # checkpoint 
+
+                # checkpoint
                 if (self.epoch % cfg.training.checkpoint_every) == 0:
                     # checkpointing
                     if cfg.checkpoint.save_last_ckpt:
@@ -306,7 +316,7 @@ class DexmachinaDiffusionUnetWorkspace(BaseWorkspace):
                     for key, value in step_log.items():
                         new_key = key.replace('/', '_')
                         metric_dict[new_key] = value
-                    
+
                     # We can't copy the last checkpoint here
                     # since save_checkpoint uses threads.
                     # therefore at this point the file might have been empty!
@@ -319,14 +329,15 @@ class DexmachinaDiffusionUnetWorkspace(BaseWorkspace):
 
                 # end of epoch
                 # log of last step is combined with validation and rollout
-                wandb_run.log(step_log, step=self.global_step)
+                if log_wandb:
+                    wandb_run.log(step_log, step=self.global_step)
                 json_logger.log(step_log)
                 self.global_step += 1
                 self.epoch += 1
 
 @hydra.main(
     version_base=None,
-    config_path=str(pathlib.Path(__file__).parent.parent.joinpath("config")), 
+    config_path=str(pathlib.Path(__file__).parent.parent.joinpath("config")),
     config_name=pathlib.Path(__file__).stem)
 def main(cfg):
     workspace = DexmachinaDiffusionUnetLowdimWorkspace(cfg)

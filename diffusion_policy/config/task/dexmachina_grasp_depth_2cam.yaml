@@ -1,5 +1,18 @@
-name: grasp
+name: grasp_depth
 
+shape_meta: &shape_meta
+  # acceptable types: rgb, low_dim
+  obs:
+    imgs/${cam1_name}/depth:
+      shape: [3,256,256]
+      type: rgb
+    imgs/${cam2_name}/depth:
+      shape: [3,256,256]
+      type: rgb
+    robot/dof_pos:
+      shape: [46]
+  action:
+    shape: [23]
 dataset_dir: &dataset_dir data
 env_runner:
   _target_: diffusion_policy.env_runner.dexmachina_runner.DexMachinaEnvRunner
@@ -22,8 +35,7 @@ env_runner:
   vis_camera: null # use the depth input camera for vis
   vis_render_hw: [256, 256]
   repeat_depth: True
-  renderer: rasterizer # batched # rasterizer
-  device: cpu
+  renderer: batched # rasterizer
 
 dataset:
   _target_: diffusion_policy.dataset.dexmachina_datasets.DexmachinaImgDataset
