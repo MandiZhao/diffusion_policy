@@ -1,6 +1,9 @@
 """
 Usage:
 python eval.py --checkpoint data/image/pusht/diffusion_policy_cnn/train_0/checkpoints/latest.ckpt -o data/pusht_eval_output
+
+RUN=data/outputs/2025.08.18/22.37.25_dexmachina_grasp/
+python eval.py  -c $RUN/checkpoints/latest.ckpt  -o $RUN/eval
 """
 
 import sys
@@ -17,10 +20,7 @@ import dill
 import wandb
 import json
 from diffusion_policy.workspace.base_workspace import BaseWorkspace
-"""
-RUN=data/outputs/2025.08.18/22.37.25_dexmachina_grasp/
-python eval.py  -c $RUN/checkpoints/latest.ckpt  -o $RUN/eval
-"""
+
 @click.command()
 @click.option('-c', '--checkpoint', required=True)
 @click.option('-o', '--output_dir', required=True)
@@ -52,16 +52,17 @@ def main(checkpoint, output_dir, device, overwrite, create_dataset):
 
     # run eval
     cfg.task.env_runner.skip_env = False
-    cfg.task.env_runner.n_test = 10
+    cfg.task.env_runner.n_test = 1
     env_runner = hydra.utils.instantiate(
         cfg.task.env_runner,
         output_dir=output_dir)
     runner_log = env_runner.run(policy)
     print(runner_log)
+    breakpoint()
     if create_dataset:
         dataset = hydra.utils.instantiate(cfg.task.dataset)
         batch = dataset[0]
-        breakpoint()
+
 
     # dump log to json
     json_log = dict()

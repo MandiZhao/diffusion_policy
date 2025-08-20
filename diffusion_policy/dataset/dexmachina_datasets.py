@@ -93,9 +93,8 @@ class DexmachinaLowDimDataset(BaseLowdimDataset):
     def _sample_to_data(self, sample):
         action = sample[self.action_key].astype(np.float32)  # T, action_dim
         obs = []
-        T_slice = slice(self.n_obs_steps)
         for key in self.state_keys:
-            val = sample[key][T_slice] # slide to save RAM
+            val = sample[key]
             if val.dtype != np.float32:
                 val = np.asarray(val, dtype=np.float32) # (can avoid copy)
             val = val.reshape(val.shape[0], -1)  # Flatten last dim if needed

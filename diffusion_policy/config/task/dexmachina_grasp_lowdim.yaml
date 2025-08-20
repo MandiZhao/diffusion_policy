@@ -22,7 +22,7 @@ env_runner:
   env_kwargs_path: ${home_dir}/devmachina/dexmachina/dataset/murp/${data_name}/${rl_run}/data_env.yaml # need to load this
   state_keys: ${state_keys}
   camera_keys: ${camera_keys}
-  vis_camera: front_960
+  vis_camera: front_256
   vis_render_hw: [256, 256]
   repeat_depth: True
   renderer: batched # rasterizer
