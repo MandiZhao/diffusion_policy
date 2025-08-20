@@ -6,7 +6,7 @@ from diffusion_policy.common.pytorch_util import dict_apply
 from diffusion_policy.common.replay_buffer import ReplayBuffer
 from diffusion_policy.common.sampler import (
             SequenceSampler, get_val_mask, downsample_mask)
-from diffusion_policy.model.common.normalizer import LinearNormalizer
+from diffusion_policy.model.common.normalizer import LinearNormalizer, SingleFieldLinearNormalizer
 from diffusion_policy.dataset.base_dataset import BaseImageDataset, BaseLowdimDataset
 from diffusion_policy.common.normalize_util import get_image_range_normalizer
 
@@ -197,7 +197,14 @@ class DexmachinaImgDataset(BaseImageDataset):
 
         # Add image normalizer for all cameras
         for key in self.camera_keys:
-            normalizer[key] = get_image_range_normalizer()
+            if 'rgb' in key:
+                normalizer[key] = get_image_range_normalizer()
+            elif 'depth' in key:
+                depth_normalizer = SingleFieldLinearNormalizer.create_fit(
+                    data=self.replay_buffer[key], mode='limits',
+                    output_min=-1, output_max=1
+                )
+                normalizer[key] = depth_normalizer
 
         return normalizer
 

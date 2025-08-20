@@ -22,7 +22,7 @@ policy:
   _target_: diffusion_policy.policy.diffusion_unet_image_policy.DiffusionUnetImagePolicy
 
   shape_meta: ${shape_meta}
-  
+
   noise_scheduler:
     _target_: diffusers.schedulers.scheduling_ddim.DDIMScheduler
     num_train_timesteps: 100
@@ -46,7 +46,7 @@ policy:
     resize_shape: [240, 320]
     crop_shape: [216, 288] # ch, cw 240x320 90%
     random_crop: True
-    use_group_norm: True
+    use_group_norm: False
     share_rgb_model: False
     imagenet_norm: True
 

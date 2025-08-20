@@ -133,9 +133,9 @@ class DexMachinaEnvRunner(BaseLowdimRunner):
             self.vis_camera_key = camera_keys[0]
 
 
-    def run(self, policy: BaseLowdimPolicy, epoch: int):
+    def run(self, policy: BaseLowdimPolicy, epoch: int=-1):
         if self.skip_env:
-            return {'test_mean_score': 0.0, 'reward_std': 0.0,}, None
+            return {'test_mean_score': 0.0, 'reward_std': 0.0, 'video_path': None}
         env = self.env
         # allocate data
         # just do one batch step
@@ -168,10 +168,10 @@ class DexMachinaEnvRunner(BaseLowdimRunner):
                     if 'rgb' in k:
                         # video export assumes imgs are (B, n_obs_steps, H, W, C)
                         video_frames.append(v[:,0].cpu().numpy())  # collect video frames
-            breakpoint()
             # run policy
             with torch.no_grad():
                 action_dict = policy.predict_action(obs_dict)
+
             # handle latency_steps, we discard the first n_latency_steps actions
             # to simulate latency
             action = action_dict['action'][:,self.n_latency_steps:] # (B, n_action_steps, action_dim)
@@ -181,6 +181,7 @@ class DexMachinaEnvRunner(BaseLowdimRunner):
             # print(f"step {step+1}/{env.max_episode_steps}, reward: {reward} done: {done}")
             past_action = action
             step += 1
+
         log_data = {
             'test_mean_score': torch.mean(reward).item(),
             'reward_std': torch.std(reward).item(),

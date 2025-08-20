@@ -13,25 +13,35 @@ shape_meta:
       type: rgb
     robot/dof_pos:
       shape: [46]
+      type: low_dim
+    robot/kpt_pos:
+      shape: [18]
+      type: low_dim
+    object/part_pos:
+      shape: [3]
+      type: low_dim
+    task/kpt_dists:
+      shape: [6]
+      type: low_dim
+
   action:
     shape: [23]
 task_name: ${task.name}
-exp_name: "depth"
+exp_name: depth
 
 data_name: fairsc
 rl_run: no-vel-bbox-wrist7_box_ctrljoint_B6072_ho16
 home_dir: /checkpoint/siro/mandizhao/ # /home/mandi
 state_keys:
-- 'robot/dof_pos'
+- robot/dof_pos
 camera_keys:
 - imgs/front_256/depth # debug
 
 horizon: 16
 n_obs_steps: 2
-n_action_steps: 8
+n_action_steps: 4
 n_latency_steps: 0
 past_action_visible: False
-# keypoint_visible_rate: 1.0
 obs_as_local_cond: False
 obs_as_global_cond: True
 pred_action_steps_only: False
@@ -41,17 +51,23 @@ policy:
 
   shape_meta: ${shape_meta}
 
+  # noise_scheduler:
+  #   _target_: diffusers.schedulers.scheduling_ddim.DDIMScheduler
+  #   num_train_timesteps: 100
+  #   beta_start: 0.0001
+  #   beta_end: 0.02
+  #   # beta_schedule is important, this is the best we found
+  #   beta_schedule: squaredcos_cap_v2
+  #   clip_sample: True
+  #   prediction_type: epsilon # or sample
   noise_scheduler:
-    _target_: diffusers.schedulers.scheduling_ddim.DDIMScheduler
+    _target_: diffusers.schedulers.scheduling_ddpm.DDPMScheduler
     num_train_timesteps: 100
     beta_start: 0.0001
     beta_end: 0.02
-    # beta_schedule is important
-    # this is the best we found
     beta_schedule: squaredcos_cap_v2
-    clip_sample: True
-    set_alpha_to_one: True
-    steps_offset: 0
+    variance_type: fixed_small # Yilun's paper uses fixed_small_log instead, but easy to cause Nan
+    clip_sample: True # required when predict_epsilon=False
     prediction_type: epsilon # or sample
 
   obs_encoder:
@@ -72,7 +88,7 @@ policy:
   n_action_steps: ${eval:'${n_action_steps}+${n_latency_steps}'}
   n_obs_steps: ${n_obs_steps}
   num_inference_steps: 100
-  obs_as_global_cond: ${obs_as_global_cond}
+  # obs_as_global_cond: ${obs_as_global_cond}
   # crop_shape: null
   diffusion_step_embed_dim: 128
   down_dims: [512, 1024, 2048]
@@ -128,7 +144,7 @@ training:
   rollout_every: 200 # this should be more frequen that checkpoint_every!
   checkpoint_every: 200
   val_every: 100
-  sample_every: 100
+  sample_every: 50
   # steps per epoch
   max_train_steps: null
   max_val_steps: null
@@ -136,6 +152,7 @@ training:
   tqdm_interval_sec: 1.0
   freeze_encoder: False
 
+# for wandb
 logging:
   project: devmachina
   resume: True
@@ -155,14 +172,14 @@ checkpoint:
   save_last_snapshot: False
 
 multi_run:
-  run_dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
-  wandb_name_base: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
+  run_dir: data/outputs/${now:%m.%d-%H.%M}_${name}_${task_name}_${exp_name} # #data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${exp_name}_${task_name}
+  wandb_name_base: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${exp_name}_${task_name}
 
 hydra:
   job:
-    override_dirname: ${name}
+    override_dirname: ${exp_name}
   run:
-    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+    dir: data/outputs/${now:%m.%d-%H.%M}_${name}_${task_name}_${exp_name}  # data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${exp_name}_${task_name}
   sweep:
-    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+    dir: data/outputs/${now:%m.%d-%H.%M}_${name}_${task_name}_${exp_name}  # data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${exp_name}_${task_name}
     subdir: ${hydra.job.num}
