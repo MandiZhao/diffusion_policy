@@ -335,6 +335,12 @@ class DexmachinaDiffusionUnetWorkspace(BaseWorkspace):
                 self.global_step += 1
                 self.epoch += 1
 
+        # run wandb sync at the end of training
+        if log_wandb and cfg.logging.mode == "offline":
+            wandb_run.finish()
+            # inside self.output_dir/wandb, run wandb sync
+            os.system(f"wandb sync {self.output_dir}/wandb/offline*")
+        print(f"Finished training, output dir: {self.output_dir}")
 @hydra.main(
     version_base=None,
     config_path=str(pathlib.Path(__file__).parent.parent.joinpath("config")),

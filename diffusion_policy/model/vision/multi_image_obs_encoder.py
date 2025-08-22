@@ -39,6 +39,14 @@ class MultiImageObsEncoder(ModuleAttrMixin):
         # handle sharing vision backbone
         if share_rgb_model:
             assert isinstance(rgb_model, nn.Module)
+            if use_group_norm:
+                rgb_model = replace_submodules(
+                    root_module=rgb_model,
+                    predicate=lambda x: isinstance(x, nn.BatchNorm2d),
+                    func=lambda x: nn.GroupNorm(
+                        num_groups=x.num_features//16,
+                        num_channels=x.num_features)
+                )
             key_model_map['rgb'] = rgb_model
 
         obs_shape_meta = shape_meta['obs']
