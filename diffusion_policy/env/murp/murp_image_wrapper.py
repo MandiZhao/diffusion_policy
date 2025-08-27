@@ -112,6 +112,8 @@ class MurpImageWrapper:
             st = time.perf_counter_ns()
             self.robot.right_arm.set_joint_positions(reset_arm_pos, interpolate=True)
             self.robot.right_arm.hand.set_joint_positions(reset_hand_pos)
+
+            # TODO: set the left arm pose here too for resting!
             et = time.perf_counter_ns()
             print(f"set joint arm and hand t_d: {((et - st) / 1_000_000):.3f} ms")
             time.sleep(5)
@@ -153,16 +155,22 @@ class MurpImageWrapper:
                 is_rgb = 'image' in  obs_key
                 is_depth = 'depth' in obs_key
 
-                if 'head_image' in obs_key:
+                if 'front' in obs_key: 
+                    print("WARNING: don't have the front camera on real yet")
+                    is_depth = True
+                    depth = self.robot.perception.get_sensor_data(SensorEnum.View.HEAD).depth.image
+                    depth = np.stack([depth] * 3, axis=-1)
+
+                if 'head_image' in obs_key or ('head' in obs_key and 'rgb' in obs_key): # for dexmachina sime env
                     rgb = self.robot.perception.get_sensor_data(SensorEnum.View.HEAD).rgb.image
-                if 'torso_image' in obs_key:
+                if 'torso_image' in obs_key or ('torso' in obs_key and 'rgb' in obs_key):
                     rgb = self.robot.perception.get_sensor_data(SensorEnum.View.TORSO).rgb.image
                 if 'wrist_right_image' in obs_key:
                     rgb = self.robot.perception.get_sensor_data(SensorEnum.View.RIGHT_WRIST).rgb.image
-                if 'head_depth' in obs_key:
+                if 'head_depth' in obs_key or ('head' in obs_key and 'depth' in obs_key):
                     depth = self.robot.perception.get_sensor_data(SensorEnum.View.HEAD).depth.image
                     depth = np.stack([depth] * 3, axis=-1)
-                if 'torso_depth' in obs_key:
+                if 'torso_depth' in obs_key or ('torso' in obs_key and 'depth' in obs_key):
                     depth = self.robot.perception.get_sensor_data(SensorEnum.View.TORSO).depth.image
                     depth = np.stack([depth] * 3, axis=-1)
                 if 'wrist_right_depth' in obs_key:
@@ -179,15 +187,23 @@ class MurpImageWrapper:
                     self.obs_queue_dict[obs_key].append(eef_pos)
                     self.obs_queue_dict[self.quat_obs_key_name[0]].append(eef_quat)
                 if 'gripper_qpos' in obs_key:
-                    hand_joints = self.robot.right_arm.hand.get_joint_positions().copy()
+                    hand_joints = self.robot.right_arm.hand.c().copy()
                     self.obs_queue_dict[obs_key].append(hand_joints)
                 if 'arm_qpos' in obs_key:
                     arm_joints = self.robot.right_arm.get_joint_positions()
                     self.obs_queue_dict[obs_key].append(arm_joints)
+                
+                if 'robot/dof_pos' == obs_key:
+                    # 46dim! left & right stacked -> TODO check joint order 
+                    robot_dof = np.concatenate([
+                        ent.get_joint_positions() for ent in \
+                            [self.robot.left_arm, self.robot.left_arm.hand, self.robot.right_arm, self.robot.right_hand]
+                    ])
+                    self.obs_queue_dict[obs_key].append(robot_dof)
 
                 if is_rgb:
                     self.obs_queue_dict[obs_key].append(self._resize_image(rgb, slice_index=slice_index))
-                if is_depth:
+                if is_depth: 
                     self.obs_queue_dict[obs_key].append(self.process_depth_image(self._resize_image(depth, slice_index=slice_index)))
             elif self.i < self.episode_len:
                 obs = self.demo_data['obs'][obs_key][self.i]
@@ -211,26 +227,27 @@ class MurpImageWrapper:
         start_time = time.time()
         correct_action = None
         if self.is_real_robot:
-            rotmat_pose_in_base, gripper = action
-            if self.robot_operation_mode == "OSC_POSE":
-                if self.apply_frame_transform:
-                    # convert the action predicted in base to right base
-                    ee_pos, ee_rot_xyzw = mat2pose(self.right_base_T_base @ rotmat_pose_in_base)
-                else:
-                    ee_pos, ee_rot_xyzw = mat2pose(rotmat_pose_in_base)
-                arm_action = np.concatenate((ee_pos, ee_rot_xyzw))
-                self.robot.right_arm.set_end_effector_pose(target_pose=arm_action, interpolation_steps=None) # use default interpolation
-            else:
-                arm_joint_states = rotmat_pose_in_base
-                self.robot.right_arm.set_joint_positions(np.array(arm_joint_states).flatten(), interpolate=False)
-            if len(gripper) == 16:
-                self.robot.right_arm.hand.set_joint_positions(target_positions=gripper)
-            else:
-                #TODO : If gripper action is binary substitute with recorded closing gripper angles
-                if gripper[0] > 0.5:
-                    self.robot.right_arm.hand.set_joint_positions(target_positions=self.close_hand_joints)
-                else:
-                    self.robot.right_arm.hand.set_joint_positions(target_positions=self.reset_hand_pos)
+            print('got action shaped', action.shape)
+            # rotmat_pose_in_base, gripper = action
+            # if self.robot_operation_mode == "OSC_POSE":
+            #     if self.apply_frame_transform:
+            #         # convert the action predicted in base to right base
+            #         ee_pos, ee_rot_xyzw = mat2pose(self.right_base_T_base @ rotmat_pose_in_base)
+            #     else:
+            #         ee_pos, ee_rot_xyzw = mat2pose(rotmat_pose_in_base)
+            #     arm_action = np.concatenate((ee_pos, ee_rot_xyzw))
+            #     self.robot.right_arm.set_end_effector_pose(target_pose=arm_action, interpolation_steps=None) # use default interpolation
+            # else:
+            #     arm_joint_states = rotmat_pose_in_base
+            #     self.robot.right_arm.set_joint_positions(np.array(arm_joint_states).flatten(), interpolate=False)
+            # if len(gripper) == 16:
+            #     self.robot.right_arm.hand.set_joint_positions(target_positions=gripper)
+            # else:
+            #     #TODO : If gripper action is binary substitute with recorded closing gripper angles
+            #     if gripper[0] > 0.5:
+            #         self.robot.right_arm.hand.set_joint_positions(target_positions=self.close_hand_joints)
+            #     else:
+            #         self.robot.right_arm.hand.set_joint_positions(target_positions=self.reset_hand_pos)
             end_time = time.time()
             time.sleep(max(self.sleep_timer - (end_time - start_time), 0))
         elif self.i < self.episode_len:

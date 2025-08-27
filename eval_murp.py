@@ -55,6 +55,7 @@ def main(checkpoint, robot_operation_mode, is_real_robot, override_action_deploy
     device = torch.device(device)
     policy.to(device)
     policy.eval()
+    print('policy loaded') 
     # run eval
     murp_config_path = os.environ.get("MURP_CONFIG_PATH")
     path_to_transform = os.environ.get("BASE_T_RIGHT_BASE", "base_T_right_base.npy")
@@ -65,10 +66,10 @@ def main(checkpoint, robot_operation_mode, is_real_robot, override_action_deploy
         dataset = hydra.utils.instantiate(cfg.task.dataset)
         assert isinstance(dataset, BaseImageDataset)
         # configure validation dataset
-        with open("videos_sorted.json") as f:
-            episode_filters = json.load(f)
-            filter_episodes = np.concatenate([episode_filters["right"][:2]], axis=0)
-        val_dataset = dataset.get_validation_dataset(filter_episodes)
+        # with open("videos_sorted.json") as f:
+        #     episode_filters = json.load(f)
+        #     filter_episodes = np.concatenate([episode_filters["right"][:2]], axis=0)
+        # val_dataset = dataset.get_validation_dataset(filter_episodes)
         val_set = val_dataset.train_mask.copy()
         val_indices = np.where(val_set)[0].tolist()
         if not len(val_indices):
@@ -79,7 +80,11 @@ def main(checkpoint, robot_operation_mode, is_real_robot, override_action_deploy
     else:
         val_indices = [0]
         demo_path = ""
-    
+    try:
+        shape_meta = cfg.task.shape_meta
+    except:
+        shape_meta = cfg.shape_meta
+    abs_action = False 
     fitness = []
     for demo_index in val_indices:
         env_runner = MurpImageRunner(
@@ -90,9 +95,9 @@ def main(checkpoint, robot_operation_mode, is_real_robot, override_action_deploy
             robot_operation_mode=cfg.task.env_runner.get('robot_operation_mode', robot_operation_mode),
             n_obs_steps=cfg.task.dataset.n_obs_steps,
             n_action_steps=cfg.n_action_steps,
-            shape_meta=cfg.task.shape_meta,
-            fps=10,
-            abs_action=cfg.task.abs_action,
+            shape_meta=shape_meta,
+            fps=30,
+            abs_action=abs_action,
             max_steps=max_steps,
             is_real_robot=is_real_robot,
             eval_threshold=cfg.training.get('eval_threshold', 0.05),
