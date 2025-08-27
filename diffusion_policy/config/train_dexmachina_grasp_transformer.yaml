@@ -8,53 +8,49 @@ _target_: diffusion_policy.workspace.dexmachina_grasp_workspace.DexmachinaDiffus
 shape_meta:
   # acceptable types: rgb, low_dim
   obs:
-    # imgs/head_256/depth:
-    #   shape: [3,256,256]
-    #   type: rgb
-    imgs/front_320/depth:
-      shape: [3,240,320]
+    imgs/front_256/rgb:
+      shape: [3,256,256]
       type: rgb
     robot/dof_pos:
       shape: [46]
       type: low_dim
-    # robot/kpt_pos:
-    #   shape: [18]
-    #   type: low_dim
-    # object/part_pos:
-    #   shape: [3]
-    #   type: low_dim
-    # task/kpt_dists:
-    #   shape: [6]
-    #   type: low_dim
+    robot/kpt_pos:
+      shape: [18]
+      type: low_dim
+    object/part_pos:
+      shape: [3]
+      type: low_dim
+    task/kpt_dists:
+      shape: [6]
+      type: low_dim
+
   action:
     shape: [23]
 
-camera_keys:
-- imgs/front_320/depth # imgs/head_256/depth
-state_keys:
-- robot/dof_pos
-
 task_name: ${task.name}
-exp_name: grasp
+exp_name: rgb
 
 data_name: fairsc
 rl_run: no-vel-bbox-wrist7_box_ctrljoint_B6072_ho16
 home_dir: /checkpoint/siro/mandizhao/ # /home/mandi
-
+state_keys:
+- robot/dof_pos
+camera_keys:
+- imgs/front_256/rgb # debug
 
 horizon: 16
 n_obs_steps: 2
 n_action_steps: 4
 n_latency_steps: 0
 past_action_visible: False
-obs_as_local_cond: False
-obs_as_global_cond: True
+obs_as_cond: True
 pred_action_steps_only: False
 
 policy:
-  _target_: diffusion_policy.policy.diffusion_unet_image_policy.DiffusionUnetImagePolicy
+  _target_: diffusion_policy.policy.diffusion_transformer_hybrid_image_policy.DiffusionTransformerHybridImagePolicy
 
   shape_meta: ${shape_meta}
+
   noise_scheduler:
     _target_: diffusers.schedulers.scheduling_ddpm.DDPMScheduler
     num_train_timesteps: 100
@@ -65,35 +61,23 @@ policy:
     clip_sample: True # required when predict_epsilon=False
     prediction_type: epsilon # or sample
 
-  obs_encoder:
-    _target_: diffusion_policy.model.vision.multi_image_obs_encoder.MultiImageObsEncoder
-    shape_meta: ${shape_meta}
-    rgb_model:
-      _target_: diffusion_policy.model.vision.model_getter.get_resnet
-      name: resnet18
-      weights: null
-    resize_shape: null # [480, 200]
-    crop_shape: null # [100, 100] # ch, cw 240x320 90%
-    random_crop: False
-    use_group_norm: True
-    share_rgb_model: True
-    imagenet_norm: False
-    debug_zero_emb: False
-
   horizon: ${horizon}
   n_action_steps: ${eval:'${n_action_steps}+${n_latency_steps}'}
   n_obs_steps: ${n_obs_steps}
   num_inference_steps: 100
-  # obs_as_global_cond: ${obs_as_global_cond}
-  # crop_shape: null
-  diffusion_step_embed_dim: 128
-  down_dims: [512, 1024, 2048]
-  kernel_size: 5
-  n_groups: 8
-  cond_predict_scale: True
+  crop_shape: [200, 200]
+  obs_encoder_group_norm: True
+  eval_fixed_crop: True
 
-  # scheduler.step params
-  # predict_epsilon: True
+  n_layer: 8
+  n_cond_layers: 0  # >0: use transformer encoder for cond, otherwise use MLP
+  n_head: 4
+  n_emb: 256
+  p_drop_emb: 0.0
+  p_drop_attn: 0.3
+  causal_attn: True
+  time_as_cond: True # if false, use BERT like encoder only arch, time as input
+  obs_as_cond: ${obs_as_cond}
 
 ema:
   _target_: diffusion_policy.model.diffusion.ema_model.EMAModel
@@ -104,7 +88,7 @@ ema:
   max_value: 0.9999
 
 dataloader:
-  batch_size: 128
+  batch_size: 64
   num_workers: 8
   shuffle: True
   pin_memory: True

@@ -9,6 +9,7 @@ from diffusion_policy.common.sampler import (
 from diffusion_policy.model.common.normalizer import LinearNormalizer, SingleFieldLinearNormalizer
 from diffusion_policy.dataset.base_dataset import BaseImageDataset, BaseLowdimDataset
 from diffusion_policy.common.normalize_util import get_image_range_normalizer
+from diffusion_policy.model.common.noise_adder import StateNoiseAdder, DepthImageAugmentor
 
 class DexmachinaLowDimDataset(BaseLowdimDataset):
     def __init__(self,
@@ -166,6 +167,7 @@ class DexmachinaImgDataset(BaseImageDataset):
         self.pad_after = pad_after
         self.n_obs_steps = n_obs_steps
         self.n_action_steps = n_action_steps
+        self.get_noise_adder()
 
     def get_validation_dataset(self):
         val_set = copy.copy(self)
@@ -253,4 +255,18 @@ class DexmachinaImgDataset(BaseImageDataset):
         sample = self.sampler.sample_sequence(idx)
         data = self._sample_to_data(sample)
         torch_data = dict_apply(data, torch.from_numpy)
+
+        for key in self.camera_keys:
+            if 'depth' in key:
+                torch_data['obs'][key] = self.depth_augmentor(torch_data['obs'][key])
+
+        for key in self.state_keys:
+            torch_data['obs'][key] = self.state_noise_adder(torch_data['obs'][key])
+
         return torch_data
+
+    def get_noise_adder(self):
+        self.state_noise_adder = StateNoiseAdder(std=0.1) # was 0.02
+        self.depth_augmentor = DepthImageAugmentor(
+            noise_std=0.01, dropout_prob=0.7, patch_size=(10,20), num_patches=10
+            )

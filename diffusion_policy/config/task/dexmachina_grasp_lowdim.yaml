@@ -26,6 +26,7 @@ env_runner:
   vis_render_hw: [256, 256]
   repeat_depth: True
   renderer: batched # rasterizer
+  randomize_camera: False
 
 dataset:
   _target_: diffusion_policy.dataset.dexmachina_datasets.DexmachinaLowDimDataset

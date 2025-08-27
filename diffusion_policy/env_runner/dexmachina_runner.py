@@ -60,6 +60,7 @@ class DexMachinaEnvRunner(BaseLowdimRunner):
             repeat_depth=True,
             renderer="batched", # or rasterizer
             device="cpu",
+            randomize_camera=False, # not randomize camera for eval
         ):
         super().__init__(output_dir)
         env_n_obs_steps = n_obs_steps + n_latency_steps
@@ -103,6 +104,7 @@ class DexMachinaEnvRunner(BaseLowdimRunner):
                 use_cam_kwargs[vis_camera] = kwargs
 
             wrapper_cfg.camera_kwargs = use_cam_kwargs
+            wrapper_cfg.randomize_camera = randomize_camera # not randomize camera for eval!
             wrapper_cfg.repeat_depth = repeat_depth
             # set device to cpu
             rl_env_kwargs['device'] = torch.device(device)

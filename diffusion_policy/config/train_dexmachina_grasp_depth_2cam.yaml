@@ -4,13 +4,39 @@ defaults:
 
 name: 'dexmachina'
 _target_: diffusion_policy.workspace.dexmachina_grasp_workspace.DexmachinaDiffusionUnetWorkspace
-cam1_name: front_256
-cam2_name: torso_256
-shape_meta: ${task.shape_meta}
+
+shape_meta:
+  # acceptable types: rgb, low_dim
+  obs:
+    imgs/torso_320/depth:
+      shape: [3,240,320]
+      type: rgb
+    imgs/head_320/depth:
+      shape: [3,240,320]
+      type: rgb
+    robot/dof_pos:
+      shape: [46]
+      type: low_dim
+    # robot/kpt_pos:
+    #   shape: [18]
+    #   type: low_dim
+    # object/part_pos:
+    #   shape: [3]
+    #   type: low_dim
+    # task/kpt_dists:
+    #   shape: [6]
+    #   type: low_dim
+
+  action:
+    shape: [23]
+camera_keys:
+- imgs/torso_320/depth
+- imgs/head_320/depth
+
 task_name: ${task.name}
 exp_name: "depth"
 
-data_name: fairsc
+data_name: ep500
 rl_run: no-vel-bbox-wrist7_box_ctrljoint_B6072_ho16
 home_dir: /checkpoint/siro/mandizhao/ # /home/mandi
 state_keys:
@@ -20,13 +46,10 @@ state_keys:
 # - 'object/part_quat'
 # - 'task/kpt_dists'
 
-camera_keys:
-- imgs/${cam1_name}/depth
-- imgs/${cam2_name}/depth
 
-horizon: 16
+horizon: 24
 n_obs_steps: 2
-n_action_steps: 8
+n_action_steps: 4
 n_latency_steps: 0
 past_action_visible: False
 # keypoint_visible_rate: 1.0
@@ -39,17 +62,26 @@ policy:
 
   shape_meta: ${shape_meta}
 
+  # noise_scheduler:
+  #   _target_: diffusers.schedulers.scheduling_ddim.DDIMScheduler
+  #   num_train_timesteps: 100
+  #   beta_start: 0.0001
+  #   beta_end: 0.02
+  #   # beta_schedule is important
+  #   # this is the best we found
+  #   beta_schedule: squaredcos_cap_v2
+  #   clip_sample: True
+  #   set_alpha_to_one: True
+  #   steps_offset: 0
+  #   prediction_type: epsilon # or sample
   noise_scheduler:
-    _target_: diffusers.schedulers.scheduling_ddim.DDIMScheduler
+    _target_: diffusers.schedulers.scheduling_ddpm.DDPMScheduler
     num_train_timesteps: 100
     beta_start: 0.0001
     beta_end: 0.02
-    # beta_schedule is important
-    # this is the best we found
     beta_schedule: squaredcos_cap_v2
-    clip_sample: True
-    set_alpha_to_one: True
-    steps_offset: 0
+    variance_type: fixed_small # Yilun's paper uses fixed_small_log instead, but easy to cause Nan
+    clip_sample: True # required when predict_epsilon=False
     prediction_type: epsilon # or sample
 
   obs_encoder:
@@ -60,8 +92,8 @@ policy:
       name: resnet18
       weights: null
     resize_shape: null # [480, 200]
-    crop_shape: null # [100, 100] # ch, cw 240x320 90%
-    random_crop: False
+    crop_shape: [200, 200] # [100, 100] # ch, cw 240x320 90%
+    random_crop: True
     use_group_norm: True
     share_rgb_model: True
     imagenet_norm: False
@@ -77,7 +109,6 @@ policy:
   kernel_size: 5
   n_groups: 8
   cond_predict_scale: True
-
   # scheduler.step params
   # predict_epsilon: True
 
@@ -123,10 +154,10 @@ training:
   use_ema: True
   # training loop control
   # in epochs
-  rollout_every: 200 # this should be more frequen that checkpoint_every!
+  rollout_every: 100 # this should be more frequen that checkpoint_every!
   checkpoint_every: 200
   val_every: 100
-  sample_every: 100
+  sample_every: 50
   # steps per epoch
   max_train_steps: null
   max_val_steps: null

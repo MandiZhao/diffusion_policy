@@ -10,7 +10,41 @@ import numpy as np
 from tqdm import tqdm
 from omegaconf import OmegaConf
 from diffusion_policy.dataset.dexmachina_datasets import DexmachinaLowDimDataset, DexmachinaImgDataset
+import matplotlib.pyplot as plt  # For colormap
 
+def apply_jet_colormap(depth_img_3ch: np.ndarray) -> np.ndarray:
+    """
+    Convert a 3-channel repeated depth image to a colormap visualization.
+
+    Args:
+        depth_img_3ch: numpy array, shape (H, W, 3), float32 or uint8 assumed in [0,1] or [0,255]
+
+    Returns:
+        BGR uint8 image (H, W, 3) colored with jet colormap.
+    """
+    # Convert to single channel by taking the first channel (since repeated)
+    depth_single = depth_img_3ch[:, :, 0]
+
+    # Normalize depth to [0, 1] if needed
+    if depth_single.dtype == np.uint8:
+        depth_norm = depth_single.astype(np.float32) / 255.0
+    else:
+        # Assume float input - normalize to 0..1 by min/max
+        min_val = np.min(depth_single)
+        max_val = np.max(depth_single)
+        if max_val - min_val > 1e-5:
+            depth_norm = (depth_single - min_val) / (max_val - min_val)
+        else:
+            depth_norm = np.zeros_like(depth_single)
+
+    # Apply jet colormap from matplotlib (returns RGBA)
+    cmap = plt.get_cmap('jet')
+    depth_colored = cmap(depth_norm)[:, :, :3]  # Drop alpha channel
+
+    # Convert from RGB float [0,1] to BGR uint8 [0,255]
+    depth_bgr = (depth_colored[..., ::-1] * 255).astype(np.uint8)
+
+    return depth_bgr
 
 def test_low_dim(zarr_path):
     lowdim_dataset = DexmachinaLowDimDataset(
@@ -42,9 +76,10 @@ def test_img_dataset(zarr_path):
         horizon=1,  # Single frame sampling
         pad_before=0,
         pad_after=0,
-        max_train_episodes=5,
+        max_train_episodes=2,
         state_keys=['robot/dof_pos'],
-        camera_keys=['imgs/front_256/depth', 'imgs/front_256/rgb']
+        # camera_keys=['imgs/front_256/depth', 'imgs/front_256/rgb'],
+        camera_keys=['imgs/front_320/depth', 'imgs/front_320/rgb'],
 
     )
 
@@ -53,7 +88,7 @@ def test_img_dataset(zarr_path):
 
     # Get dataset info
     replay_buffer = dataset.replay_buffer
-    n_episodes = replay_buffer.n_episodes
+    n_episodes = 3
     print(f"Number of episodes: {n_episodes}")
 
     # Initialize video writers for each camera
@@ -73,14 +108,21 @@ def test_img_dataset(zarr_path):
         for frame_idx in range(episode_length):
             # Get frame data for each camera
             for key in dataset.camera_keys:
-                if 'rgb' not in key:
+                is_depth = 'depth' in key
+                is_rgb = 'rgb' in key
+                if not (is_depth or is_rgb):
                     continue
                 cam_name = key
 
                 # Get RGB frame (C, H, W) and convert to uint8 (H, W, C)
                 frame = episode_data[key][frame_idx] # np.array
                 frame = frame.transpose(1, 2, 0)
-                frame = (frame * 255).astype(np.uint8)
+
+                if is_rgb:
+                    frame = (frame * 255).astype(np.uint8)
+                    frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                else:
+                    frame_bgr = apply_jet_colormap(frame)
 
                 # Initialize video writer if needed
                 if cam_name not in video_writers:
@@ -93,10 +135,6 @@ def test_img_dataset(zarr_path):
                         video_path, fourcc, fps, (frame_shape[1], frame_shape[0])
                     )
                     print(f"Created video writer for {cam_name}: {video_path}")
-
-                # Convert RGB to BGR for OpenCV
-                frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-
                 # Write frame to video
                 video_writers[cam_name].write(frame_bgr)
 
@@ -118,85 +156,73 @@ def test_img_dataset(zarr_path):
     print(f"Videos created for cameras: {list(video_writers.keys())}")
     print(f"Output directory: {output_dir}")
 
-
-def test_with_dataset_iteration(zarr_path):
-    """
-    Alternative test function that uses dataset iteration instead of direct replay buffer access.
-    This method respects the dataset's sampling logic but may be slower.
-    """
-    # Configuration
-    output_dir = "dataset_videos_v2"
-    fps = 30
-
-    # Create output directory
-    os.makedirs(output_dir, exist_ok=True)
-
-    print("Loading dataset...")
+def test_img_batch(zarr_path, batch_size=8):
+    # Load dataset
     dataset = DexmachinaImgDataset(
         zarr_path=zarr_path,
-        horizon=3,  # Single frame sampling
-        use_rgb=True,
-        use_depth=False,
-        val_ratio=0.0
+        horizon=16,
+        max_train_episodes=1,
+        camera_keys=['imgs/front_320/depth', 'imgs/front_320/rgb'],
+        state_keys=['robot/dof_pos']
     )
+    output_dir = "dataset_videos"
+    # Create depth augmentor (example params)
+    # depth_augmentor = DepthImageAugmentor(noise_std=0.02, dropout_prob=0.3)
 
+    # Sample a batch of indices randomly
+    indices = np.random.choice(len(dataset), batch_size, replace=False)
 
-    print(f"Dataset loaded: {len(dataset)} samples")
-    print(f"Available cameras: {dataset.camera_keys}")
-
-    # Initialize video writers
+    # Prepare video writers for each camera (B, T=1, C, H, W)
     video_writers = {}
-    frame_shape = None
+    fps = 10
 
-    print("Processing dataset samples...")
+    for idx in indices:
+        sample = dataset[idx]  # dict: {'obs': {cam_key: tensor}, 'action': tensor}
 
-    # Iterate through all samples
-    for idx in tqdm(range(len(dataset)), desc="Processing samples"):
-        sample = dataset[idx]
-        # Process each camera
-        for key in dataset.camera_keys:
-            if 'rgb' not in key:
+        for cam_key in dataset.camera_keys:
+            is_depth = 'depth' in cam_key
+            is_rgb = 'rgb' in cam_key
+            if not (is_depth or is_rgb):
                 continue
 
-            # Get frame (already normalized to [0,1], shape: (1, 3, H, W))
-            frame_tensor = sample['obs'][key][0]  # Remove time dimension
+            frame = sample['obs'][cam_key]  # tensor shape [T=1, C, H, W]
+            frame = frame.squeeze(0).cpu().numpy()  # (C, H, W)
 
-            # Convert to numpy and transpose to (H, W, C)
-            frame = frame_tensor.permute(1, 2, 0).numpy()
-            frame = (frame * 255).astype(np.uint8)
+            # Apply depth augmentor if depth
+            if is_depth:
+                frame_tensor = torch.from_numpy(frame).unsqueeze(0)  # add batch dim
+                frame = frame_tensor.squeeze(0).cpu().numpy()
 
-            # Initialize video writer if needed
-            if cam_name not in video_writers:
-                if frame_shape is None:
-                    frame_shape = frame.shape
+            # Convert to HWC
+            frame = np.transpose(frame, (1, 2, 0))
 
-                video_path = os.path.join(output_dir, f"{cam_name}_all_episodes_v2.mp4")
+            if is_rgb:
+                img = (frame * 255).astype(np.uint8)
+                img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            else:  # depth: visualize with jet colormap
+                img_bgr = apply_jet_colormap(frame)
+
+            # Init video writer per cam if needed
+            if cam_key not in video_writers:
+                h, w = img_bgr.shape[:2]
+                video_path = f"{output_dir}/{cam_key.replace('/', '_')}_batch.mp4"
                 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                video_writers[cam_name] = cv2.VideoWriter(
-                    video_path, fourcc, fps, (frame_shape[1], frame_shape[0])
-                )
-                print(f"Created video writer for {cam_name}: {video_path}")
+                video_writers[cam_key] = cv2.VideoWriter(video_path, fourcc, fps, (w, h))
 
-            # Convert RGB to BGR for OpenCV
-            frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            video_writers[cam_key].write(img_bgr)
 
-            # Write frame to video
-            video_writers[cam_name].write(frame_bgr)
-
-    # Close all video writers
-    print("Finalizing videos...")
-    for cam_name, writer in video_writers.items():
+    for writer in video_writers.values():
         writer.release()
-        video_path = os.path.join(output_dir, f"{cam_name}_all_episodes_v2.mp4")
-        print(f"Video saved: {video_path}")
+    print("Batch videos saved for cameras:", list(video_writers.keys()))
 
-    print(f"\nVideos created for cameras: {list(video_writers.keys())}")
 
 if __name__ == '__main__':
     # zarr_path = '/home/mandi/devmachina/dexmachina/dataset/murp/no-vel-bbox-wrist7_box_ctrljoint_B6072_ho16/replay_buffer.zarr'
-    zarr_path = '/checkpoint/siro/mandizhao/devmachina/dexmachina/dataset/murp/ep500/no-vel-bbox-wrist7_box_ctrljoint_B6072_ho16/replay_buffer.zarr'
+    # zarr_path = '/checkpoint/siro/mandizhao/devmachina/dexmachina/dataset/murp/ep500/no-vel-bbox-wrist7_box_ctrljoint_B6072_ho16/replay_buffer.zarr'
+    zarr_path = '/checkpoint/siro/mandizhao/devmachina/dexmachina/dataset/murp/cam320/no-vel-bbox-wrist7_box_ctrljoint_B6072_ho16/replay_buffer.zarr'
+
     # test_low_dim(zarr_path)
 
-    test_img_dataset(zarr_path)
+    # test_img_dataset(zarr_path)
 
-    # test_with_dataset_iteration(zarr_path)
+    test_img_batch(zarr_path)

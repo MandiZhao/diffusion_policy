@@ -24,6 +24,7 @@ env_runner:
   repeat_depth: True
   renderer: rasterizer # batched # rasterizer
   device: cpu
+  randomize_camera: False
 
 dataset:
   _target_: diffusion_policy.dataset.dexmachina_datasets.DexmachinaImgDataset

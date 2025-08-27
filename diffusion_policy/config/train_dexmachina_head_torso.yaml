@@ -1,6 +1,6 @@
 defaults:
   - _self_
-  - task: dexmachina_grasp_depth
+  - task: dexmachina_grasp_depth_2cam
 
 name: 'dexmachina'
 _target_: diffusion_policy.workspace.dexmachina_grasp_workspace.DexmachinaDiffusionUnetWorkspace
@@ -8,11 +8,11 @@ _target_: diffusion_policy.workspace.dexmachina_grasp_workspace.DexmachinaDiffus
 shape_meta:
   # acceptable types: rgb, low_dim
   obs:
-    # imgs/head_256/depth:
-    #   shape: [3,256,256]
-    #   type: rgb
-    imgs/front_320/depth:
-      shape: [3,240,320]
+    imgs/head_256/depth:
+      shape: [3,256,256]
+      type: rgb
+    imgs/torso_256/depth:
+      shape: [3,256,256]
       type: rgb
     robot/dof_pos:
       shape: [46]
@@ -26,27 +26,33 @@ shape_meta:
     # task/kpt_dists:
     #   shape: [6]
     #   type: low_dim
+
   action:
     shape: [23]
-
 camera_keys:
-- imgs/front_320/depth # imgs/head_256/depth
-state_keys:
-- robot/dof_pos
+- imgs/torso_256/depth
+- imgs/head_256/depth
 
 task_name: ${task.name}
-exp_name: grasp
+exp_name: "depth"
 
-data_name: fairsc
+data_name: ep500
 rl_run: no-vel-bbox-wrist7_box_ctrljoint_B6072_ho16
 home_dir: /checkpoint/siro/mandizhao/ # /home/mandi
+state_keys:
+- 'robot/dof_pos'
+# - 'robot/kpt_pos'
+# - 'object/part_pos'
+# - 'object/part_quat'
+# - 'task/kpt_dists'
 
 
-horizon: 16
+horizon: 24
 n_obs_steps: 2
 n_action_steps: 4
 n_latency_steps: 0
 past_action_visible: False
+# keypoint_visible_rate: 1.0
 obs_as_local_cond: False
 obs_as_global_cond: True
 pred_action_steps_only: False
@@ -55,6 +61,19 @@ policy:
   _target_: diffusion_policy.policy.diffusion_unet_image_policy.DiffusionUnetImagePolicy
 
   shape_meta: ${shape_meta}
+
+  # noise_scheduler:
+  #   _target_: diffusers.schedulers.scheduling_ddim.DDIMScheduler
+  #   num_train_timesteps: 100
+  #   beta_start: 0.0001
+  #   beta_end: 0.02
+  #   # beta_schedule is important
+  #   # this is the best we found
+  #   beta_schedule: squaredcos_cap_v2
+  #   clip_sample: True
+  #   set_alpha_to_one: True
+  #   steps_offset: 0
+  #   prediction_type: epsilon # or sample
   noise_scheduler:
     _target_: diffusers.schedulers.scheduling_ddpm.DDPMScheduler
     num_train_timesteps: 100
@@ -73,25 +92,23 @@ policy:
       name: resnet18
       weights: null
     resize_shape: null # [480, 200]
-    crop_shape: null # [100, 100] # ch, cw 240x320 90%
-    random_crop: False
+    crop_shape: [200, 200] # [100, 100] # ch, cw 240x320 90%
+    random_crop: True
     use_group_norm: True
     share_rgb_model: True
     imagenet_norm: False
-    debug_zero_emb: False
 
   horizon: ${horizon}
   n_action_steps: ${eval:'${n_action_steps}+${n_latency_steps}'}
   n_obs_steps: ${n_obs_steps}
   num_inference_steps: 100
-  # obs_as_global_cond: ${obs_as_global_cond}
+  obs_as_global_cond: ${obs_as_global_cond}
   # crop_shape: null
   diffusion_step_embed_dim: 128
   down_dims: [512, 1024, 2048]
   kernel_size: 5
   n_groups: 8
   cond_predict_scale: True
-
   # scheduler.step params
   # predict_epsilon: True
 
@@ -148,7 +165,6 @@ training:
   tqdm_interval_sec: 1.0
   freeze_encoder: False
 
-# for wandb
 logging:
   project: devmachina
   resume: True
@@ -168,14 +184,14 @@ checkpoint:
   save_last_snapshot: False
 
 multi_run:
-  run_dir: data/outputs/${now:%m.%d-%H.%M}_${name}_${task_name}_${exp_name} # #data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${exp_name}_${task_name}
-  wandb_name_base: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${exp_name}_${task_name}
+  run_dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+  wandb_name_base: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
 
 hydra:
   job:
-    override_dirname: ${exp_name}
+    override_dirname: ${name}
   run:
-    dir: data/outputs/${now:%m.%d-%H.%M}_${name}_${task_name}_${exp_name}  # data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${exp_name}_${task_name}
+    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
   sweep:
-    dir: data/outputs/${now:%m.%d-%H.%M}_${name}_${task_name}_${exp_name}  # data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${exp_name}_${task_name}
+    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
     subdir: ${hydra.job.num}

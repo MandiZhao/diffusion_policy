@@ -91,17 +91,11 @@ class DexmachinaDiffusionUnetWorkspace(BaseWorkspace):
         dataset = hydra.utils.instantiate(cfg.task.dataset)
         print(f"Dataset created with {len(dataset)} samples")
         assert isinstance(dataset, BaseLowdimDataset) or isinstance(dataset, BaseImageDataset)
-        if cfg.task.env_runner.skip_env:
-            train_dataloader = DataLoader(
-                dataset, #generator=torch.Generator(device=device),
-                **cfg.dataloader,
-                )
-        else:
-            train_dataloader = DataLoader(
-                dataset,
-                generator=torch.Generator(device='cpu'), # NOTE for some reason this is needed when sim env is enabled
-                **cfg.dataloader
-                )
+        train_dataloader = DataLoader(
+            dataset,
+            generator=torch.Generator(device='cpu'), # NOTE for some reason this is needed when sim env is enabled
+            **cfg.dataloader
+            )
         normalizer = dataset.get_normalizer()
 
         # configure validation dataset
@@ -336,10 +330,10 @@ class DexmachinaDiffusionUnetWorkspace(BaseWorkspace):
                 self.epoch += 1
 
         # run wandb sync at the end of training
-        if log_wandb and cfg.logging.mode == "offline":
-            wandb_run.finish()
-            # inside self.output_dir/wandb, run wandb sync
-            os.system(f"wandb sync {self.output_dir}/wandb/offline*")
+        # if log_wandb and cfg.logging.mode == "offline":
+        #     wandb_run.finish()
+        #     # inside self.output_dir/wandb, run wandb sync
+        #     os.system(f"wandb sync {self.output_dir}/wandb/offline*")
         print(f"Finished training, output dir: {self.output_dir}")
 @hydra.main(
     version_base=None,
